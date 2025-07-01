@@ -19,7 +19,7 @@ CAPTIONS_FILE = "/workspace/TransferLearningCaptioning/data/flickr30k/captions.j
 
 # --- Model & Training Configurations ---
 CLIP_MODEL = 'ViT-B/16'  # Use smaller model to reduce memory usage (ViT-B/16 instead of ViT-L/14)
-BATCH_SIZE = 16           # Updated to match checkpoint config
+BATCH_SIZE = 8           # Updated to match checkpoint config
 EPOCHS = 1               # Updated to match checkpoint config (more training)
 LEARNING_RATE = 0.00028006308978429485  # Updated to match checkpoint config
 SHUFFLE_DATALOADER = True
