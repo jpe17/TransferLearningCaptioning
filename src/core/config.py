@@ -17,7 +17,7 @@ print(f"🔧 Using device: {DEVICE} with dtype: {MODEL_DTYPE}")
 
 # --- Data Paths ---
 # Adjust these paths to where your Flickr30k dataset is stored
-IMAGES_DIR = "../../data/flickr30k/images"
+IMAGES_DIR = "../../data/flickr30k/Images"
 CAPTIONS_FILE = "../../data/flickr30k/captions.json"
 
 # --- Model & Training Configurations ---
