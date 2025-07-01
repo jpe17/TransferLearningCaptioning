@@ -40,7 +40,7 @@ LABEL_SMOOTHING = 0.0    # Updated to match checkpoint config (no label smoothin
 WARMUP_STEPS_RATIO = 0.1  # Updated to match checkpoint config
 
 # --- Sweep Configuration ---
-MAX_STEPS_PER_SWEEP = 50
+MAX_STEPS_PER_SWEEP = 40
 
 # --- Checkpoint & Output Configuration ---
 CHECKPOINTS_BASE_DIR = "checkpoints"
