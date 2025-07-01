@@ -164,9 +164,10 @@ def collate_fn(batch):
 
 def create_dataloaders(images_dir=None, captions_file=None, batch_size=None, val_split=None, test_split=None, seed=None, tokenizer=None, max_samples=None):
     """Create train/val/test dataloaders with teacher forcing"""
-    # Use config defaults if not provided
-    images_dir = images_dir or IMAGES_DIR
-    captions_file = captions_file or CAPTIONS_FILE
+    # ALWAYS use absolute paths
+    images_dir = "/workspace/TransferLearningCaptioning/data/flickr30k/images"
+    captions_file = "/workspace/TransferLearningCaptioning/data/flickr30k/captions.json"
+    
     batch_size = batch_size or BATCH_SIZE
     val_split = val_split or VAL_SPLIT
     test_split = test_split or TEST_SPLIT
@@ -222,6 +223,3 @@ def create_dataloaders(images_dir=None, captions_file=None, batch_size=None, val
     )
     
     return train_loader, val_loader, test_loader
-
-# Example usage:
-# train_loader, val_loader, test_loader = create_dataloaders()

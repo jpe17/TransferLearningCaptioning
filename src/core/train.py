@@ -90,8 +90,16 @@ def train():
     # 1. Setup
     set_seed(SEED)
     
+    # HARDCODE ABSOLUTE PATHS HERE - this will override any config
+    ABSOLUTE_IMAGES_DIR = "/workspace/TransferLearningCaptioning/data/flickr30k/images"
+    ABSOLUTE_CAPTIONS_FILE = "/workspace/TransferLearningCaptioning/data/flickr30k/captions.json"
+    
     # Get all config parameters
     base_config = get_all_config_params()
+    
+    # Override with absolute paths
+    base_config['images_dir'] = ABSOLUTE_IMAGES_DIR
+    base_config['captions_file'] = ABSOLUTE_CAPTIONS_FILE
     
     # Initialize wandb - if run from sweep, config will be overridden
     wandb.init(project="transformer-lenses-dev", config=base_config)
