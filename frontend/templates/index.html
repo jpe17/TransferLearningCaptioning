@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Image Captioning AI</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+    <div class="container">
+        <h1>Image Captioning AI</h1>
+        <form id="upload-form">
+            <div id="drop-zone">
+                <input type="file" id="image-input" name="file" accept="image/*" />
+                <p>Drag & drop an image here, or <span class="file-input-label">click to select</span></p>
+            </div>
+            <button type="submit">Generate Caption</button>
+        </form>
+
+        <div id="result">
+            <div id="preview-container">
+                <img id="preview" src="#" alt="Image preview" />
+            </div>
+            <div id="caption-container">
+                <p id="caption"></p>
+                <div id="loader" class="loader" style="display: none;"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const form = document.getElementById('upload-form');
+        const imageInput = document.getElementById('image-input');
+        const dropZone = document.getElementById('drop-zone');
+        const preview = document.getElementById('preview');
+        const resultDiv = document.getElementById('result');
+        const caption = document.getElementById('caption');
+        const loader = document.getElementById('loader');
+        const submitButton = form.querySelector('button[type="submit"]');
+        const previewContainer = document.getElementById('preview-container');
+
+        function showPreview(file) {
+            if (file && file.type.startsWith('image/')) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    preview.src = e.target.result;
+                    preview.style.display = 'block';
+                    resultDiv.style.display = 'block';
+                    previewContainer.style.display = 'block';
+                    submitButton.style.display = 'inline-block';
+                    caption.textContent = '';
+                    loader.style.display = 'none';
+                };
+                reader.readAsDataURL(file);
+            }
+        }
+
+        imageInput.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            showPreview(file);
+        });
+
+        dropZone.addEventListener('click', () => {
+            imageInput.click();
+        });
+
+        dropZone.addEventListener('dragover', (event) => {
+            event.preventDefault();
+            dropZone.classList.add('dragover');
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('dragover');
+        });
+
+        dropZone.addEventListener('drop', (event) => {
+            event.preventDefault();
+            dropZone.classList.remove('dragover');
+            const file = event.dataTransfer.files[0];
+
+            // Set the file on the input for the form submission
+            const dataTransfer = new DataTransfer();
+            dataTransfer.items.add(file);
+            imageInput.files = dataTransfer.files;
+            
+            showPreview(file);
+        });
+
+        form.addEventListener('submit', async function(event) {
+            event.preventDefault();
+            caption.textContent = '';
+            loader.style.display = 'block';
+            resultDiv.style.display = 'block';
+            
+            const formData = new FormData();
+            formData.append('file', imageInput.files[0]);
+
+            try {
+                const response = await fetch('/caption', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data.caption) {
+                    caption.textContent = data.caption;
+                } else {
+                    caption.textContent = 'Error: ' + (data.error || 'Unknown error');
+                }
+            } catch (error) {
+                caption.textContent = 'Error: Could not connect to the server.';
+            } finally {
+                loader.style.display = 'none';
+            }
+        });
+    </script>
+</body>
+</html> 
