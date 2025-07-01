@@ -17,8 +17,8 @@ print(f"🔧 Using device: {DEVICE} with dtype: {MODEL_DTYPE}")
 
 # --- Data Paths ---
 # Adjust these paths to where your Flickr30k dataset is stored
-IMAGES_DIR = "data/flickr30k/images"
-CAPTIONS_FILE = "data/flickr30k/captions.json"
+IMAGES_DIR = "../../data/flickr30k/images"
+CAPTIONS_FILE = "../../data/flickr30k/captions.json"
 
 # --- Model & Training Configurations ---
 CLIP_MODEL = 'ViT-B/16'  # Use smaller model to reduce memory usage (ViT-B/16 instead of ViT-L/14)
