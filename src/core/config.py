@@ -5,13 +5,10 @@ import os
 # Force consistent dtypes on MPS to avoid dtype mismatch errors
 if torch.cuda.is_available():
     DEVICE = "cuda"
-    MODEL_DTYPE = torch.float16  # Use half precision on CUDA
+    MODEL_DTYPE = torch.float32  # Use half precision on CUDA
 elif torch.backends.mps.is_available():
     DEVICE = "mps" 
     MODEL_DTYPE = torch.float32  # Force float32 on MPS - ALL tensors must match!
-else:
-    DEVICE = "cpu"
-    MODEL_DTYPE = torch.float32  # Use float32 on CPU
 
 print(f"🔧 Using device: {DEVICE} with dtype: {MODEL_DTYPE}")
 
