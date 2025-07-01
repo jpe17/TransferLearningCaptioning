@@ -135,7 +135,8 @@ def train():
     encoder, decoder = create_models_efficiently(
         encoder_hidden_dim=config.get('encoder_hidden_dim'),
         encoder_output_dim=config.get('encoder_output_dim'),
-        base_model_name=config.get('base_model_name')
+        base_model_name=config.get('base_model_name'),
+        clip_model_name=config.get('clip_model')
     )
     
     # Combine all trainable parameters

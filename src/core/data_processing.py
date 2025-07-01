@@ -48,7 +48,7 @@ class SimpleImageCaptionDataset(Dataset):
         
         return image_tensor, input_tokens, target_tokens, caption
 
-def load_flickr_data(images_dir, captions_file):
+def load_flickr_data(images_dir, captions_file, max_samples=None):
     """Load Flickr data"""
     with open(captions_file, 'r') as f:
         data = json.load(f)
@@ -57,6 +57,8 @@ def load_flickr_data(images_dir, captions_file):
     for item in data:
         image_path = os.path.join(images_dir, item['image'])
         pairs.append((image_path, item['caption']))
+        if max_samples is not None and len(pairs) >= max_samples:
+            break
     
     return pairs
 
@@ -65,7 +67,16 @@ def clip_tokenizer(caption):
     """Default CLIP tokenizer"""
     return clip.tokenize(caption, truncate=True).squeeze()
 
-def create_dataloaders(images_dir=None, captions_file=None, batch_size=None, val_split=None, test_split=None, seed=None, tokenizer=None):
+def collate_fn(batch):
+    """Custom collate function to handle None values from dataset."""
+    batch = [item for item in batch if item is not None]
+    if not batch:
+        return None, None, None, None
+    
+    images, input_tokens, target_tokens, captions = zip(*batch)
+    return torch.stack(images), torch.stack(input_tokens), torch.stack(target_tokens), list(captions)
+
+def create_dataloaders(images_dir=None, captions_file=None, batch_size=None, val_split=None, test_split=None, seed=None, tokenizer=None, max_samples=None):
     """Create train/val/test dataloaders with teacher forcing"""
     # Use config defaults if not provided
     images_dir = images_dir or IMAGES_DIR
@@ -75,7 +86,7 @@ def create_dataloaders(images_dir=None, captions_file=None, batch_size=None, val
     test_split = test_split or TEST_SPLIT
     seed = seed or SEED
     
-    data_pairs = load_flickr_data(images_dir, captions_file)
+    data_pairs = load_flickr_data(images_dir, captions_file, max_samples=max_samples)
     dataset = SimpleImageCaptionDataset(data_pairs, tokenizer=tokenizer)
     
     # Calculate splits
@@ -88,17 +99,38 @@ def create_dataloaders(images_dir=None, captions_file=None, batch_size=None, val
         dataset, [train_size, val_size, test_size], generator=generator
     )
     
-    def collate_fn(batch):
-        batch = [item for item in batch if item is not None]
-        if not batch:
-            return None, None, None, None
-        
-        images, input_tokens, target_tokens, captions = zip(*batch)
-        return torch.stack(images), torch.stack(input_tokens), torch.stack(target_tokens), list(captions)
+    # Use multiple workers for faster data loading
+    # Set persistent_workers=True to avoid re-initializing workers, which is slow on macOS/Windows
+    # Set pin_memory=True to speed up data transfer to the GPU
+    num_workers = 4  # A sensible default, can be tuned
     
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=SHUFFLE_DATALOADER, collate_fn=collate_fn)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
+    train_loader = DataLoader(
+        train_dataset, 
+        batch_size=batch_size, 
+        shuffle=SHUFFLE_DATALOADER, 
+        collate_fn=collate_fn,
+        num_workers=num_workers,
+        pin_memory=True,
+        persistent_workers=True if num_workers > 0 else False
+    )
+    val_loader = DataLoader(
+        val_dataset, 
+        batch_size=batch_size, 
+        shuffle=False, 
+        collate_fn=collate_fn,
+        num_workers=num_workers,
+        pin_memory=True,
+        persistent_workers=True if num_workers > 0 else False
+    )
+    test_loader = DataLoader(
+        test_dataset, 
+        batch_size=batch_size, 
+        shuffle=False, 
+        collate_fn=collate_fn,
+        num_workers=num_workers,
+        pin_memory=True,
+        persistent_workers=True if num_workers > 0 else False
+    )
     
     return train_loader, val_loader, test_loader
 

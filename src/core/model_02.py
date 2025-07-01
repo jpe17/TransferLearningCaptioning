@@ -3,17 +3,31 @@ Simple Patch-Level Encoder (ViT-L/14)
 =====================================
 """
 
+# Core imports - keep these at top level
 import torch
 import torch.nn as nn
 import clip
+from .config import *
+
+# Disable compilation globally
+torch._dynamo.config.suppress_errors = True
+torch._dynamo.disable()
+
+# Optional imports
+import os
 import random
 import numpy as np
-import os
-from .config import *
 from transformers import AutoModel
 from tqdm import tqdm
 import time
 import shutil
+
+# Disable dynamo compilation globally for MPS compatibility
+if DEVICE == "mps":
+    import torch._dynamo
+    torch._dynamo.config.suppress_errors = True
+    torch._dynamo.disable()
+    print("🔧 Disabled PyTorch Dynamo globally for MPS device compatibility")
 
 # Global model cache to avoid reloading
 _MODEL_CACHE = {}
@@ -58,7 +72,9 @@ def get_clip_model(model_name=None):
         # CRITICAL: Force consistent dtype on MPS to avoid mismatch errors
         if DEVICE == "mps":
             _MODEL_CACHE[cache_key] = _MODEL_CACHE[cache_key].to(dtype=MODEL_DTYPE)
-            print(f"🔧 Converted CLIP model to {MODEL_DTYPE} for MPS compatibility")
+            # Ensure ALL parameters are on the same device
+            _MODEL_CACHE[cache_key] = _MODEL_CACHE[cache_key].to(DEVICE)
+            print(f"🔧 Converted CLIP model to {MODEL_DTYPE} and moved entirely to {DEVICE}")
         
         if FREEZE_CLIP:
             for param in _MODEL_CACHE[cache_key].parameters():
@@ -90,7 +106,9 @@ def get_base_model(model_name=None):
         # CRITICAL: Ensure model is actually in the right dtype on MPS
         if DEVICE == "mps":
             _MODEL_CACHE[cache_key] = _MODEL_CACHE[cache_key].to(dtype=MODEL_DTYPE)
-            print(f"🔧 Converted base model to {MODEL_DTYPE} for MPS compatibility")
+            # Ensure ALL parameters are on the same device
+            _MODEL_CACHE[cache_key] = _MODEL_CACHE[cache_key].to(DEVICE)
+            print(f"🔧 Converted base model to {MODEL_DTYPE} and moved entirely to {DEVICE}")
         
         if FREEZE_BASE_MODEL:
             for param in _MODEL_CACHE[cache_key].parameters():
@@ -116,9 +134,6 @@ class PatchEncoder(nn.Module):
         # Use shared CLIP model or get cached one
         self.clip_model = clip_model or get_clip_model()
         
-        # ViT specs from config
-        self.num_patches = NUM_PATCHES
-        
         # CRITICAL FIX: Dynamically determine CLIP dimension from the actual model
         # This fixes shape mismatch when different CLIP models (ViT-B/16 vs ViT-L/14) are used
         if hasattr(self.clip_model.visual, 'transformer'):
@@ -139,37 +154,29 @@ class PatchEncoder(nn.Module):
         )
         
     def forward(self, images):
-        """
-        Args:
-            images: [batch_size, 3, 224, 224]
-        Returns:
-            patch_features: [batch_size, num_patches, output_dim]
-        """
-        batch_size = images.size(0)
+        """Extract patch features from images"""
+        # Assume images are already on the correct device from the training loop
         
-        # Extract patch features (before final pooling)
+        # Extract patch features
         with torch.no_grad():
-            # CRITICAL: Force ALL tensors to MODEL_DTYPE for MPS consistency
-            images = images.to(dtype=MODEL_DTYPE)
-            
-            # Run through CLIP vision transformer but stop before final pooling
-            x = self.clip_model.visual.conv1(images)  # Patch embedding
+            # Get patch embeddings
+            # The CLIP model's parameters (including positional_embedding) are on DEVICE,
+            # so we don't need to move them on every forward pass.
+            x = self.clip_model.visual.conv1(images.to(torch.float32))
             x = x.reshape(x.shape[0], x.shape[1], -1).permute(0, 2, 1)
-            x = x + self.clip_model.visual.positional_embedding[1:]  # Skip CLS token pos
             
-            # Through transformer layers
+            # Add positional embeddings
+            pos_embed = self.clip_model.visual.positional_embedding[1:]
+            x = x + pos_embed
+            
+            # Process through transformer
             x = self.clip_model.visual.ln_pre(x)
             x = x.permute(1, 0, 2)
             x = self.clip_model.visual.transformer(x)
             x = x.permute(1, 0, 2)
-            # x is now [batch_size, num_patches, clip_dim] - all patch features
-            
-            # Force to MODEL_DTYPE
-            x = x.to(dtype=MODEL_DTYPE)
         
-        # Project each patch - force consistent dtype
-        patch_features = self.projection(x.to(dtype=MODEL_DTYPE))
-        
+        # Project features
+        patch_features = self.projection(x)
         return patch_features
 
 
@@ -178,7 +185,7 @@ class PatchDecoder(nn.Module):
     Autoregressive decoder: patch features + text sequence → next token prediction
     """
     
-    def __init__(self, model_name=None, clip_model=None):
+    def __init__(self, model_name=None, clip_model=None, encoder_output_dim=None):
         super().__init__()
         
         # Use config default if not provided
@@ -200,50 +207,41 @@ class PatchDecoder(nn.Module):
         
         print(f"🔍 Detected CLIP text dimension: {self.clip_text_dim}")
         
+        # FLEXIBLE INPUT DIM: Use encoder_output_dim if provided, otherwise fallback to config
+        patch_feature_dim = encoder_output_dim or PATCH_FEATURE_DIM
+        print(f"🔍 Initializing PatchDecoder with patch feature dimension: {patch_feature_dim}")
+
         # Trainable projection layers
-        self.patch_projection = nn.Linear(PATCH_FEATURE_DIM, embed_dim)
+        self.patch_projection = nn.Linear(patch_feature_dim, embed_dim)
         self.text_projection = nn.Linear(self.clip_text_dim, embed_dim)
         
         # Trainable output head for next-token prediction
         self.output_head = nn.Linear(embed_dim, CLIP_VOCAB_SIZE)
         
     def forward(self, patch_features, input_tokens):
-        """
-        Args:
-            patch_features: [batch_size, num_patches, patch_feature_dim] 
-            input_tokens: [batch_size, seq_len] - input sequence (for teacher forcing)
-        Returns:
-            logits: [batch_size, seq_len, vocab_size] - next token predictions
-        """
-        batch_size, seq_len = input_tokens.shape
+        """Generate next token predictions"""
+        # Assume patch_features and input_tokens are already on the correct device.
         
-        # ROOT FIX: Just use CLIP's token embeddings, skip the transformer entirely
-        # Let the base language model handle contextual processing instead
+        # Get token embeddings from CLIP (without gradients)
         with torch.no_grad():
-            # Get raw token embeddings from CLIP (no transformer, no sequence length constraints)
-            text_features = self.clip_model.token_embedding(input_tokens).to(dtype=MODEL_DTYPE)
-            # Add positional embeddings for the actual sequence length
-            text_features = text_features + self.clip_model.positional_embedding[:seq_len].to(dtype=MODEL_DTYPE)
-            # text_features: [batch_size, seq_len, clip_text_dim]
+            # The model's parameters (token_embedding, positional_embedding) are already on DEVICE.
+            text_features = self.clip_model.token_embedding(input_tokens)
+            pos_embed = self.clip_model.positional_embedding[:input_tokens.shape[1]]
+            text_features = text_features + pos_embed
         
-        # Project to base model's embedding space - force MODEL_DTYPE everywhere
-        patch_embeds = self.patch_projection(patch_features.to(dtype=MODEL_DTYPE))
-        text_embeds = self.text_projection(text_features.to(dtype=MODEL_DTYPE))
+        # Project features (these are trainable)
+        patch_embeds = self.patch_projection(patch_features.to(torch.float32))
+        text_embeds = self.text_projection(text_features)
         
-        # Combine: num_patches patch tokens + seq_len text tokens
-        combined = torch.cat([patch_embeds, text_embeds], dim=1)  # [batch_size, num_patches + seq_len, embed_dim]
+        # DYNAMIC NUM_PATCHES: Infer from input tensor shape
+        num_patches = patch_features.shape[1]
+
+        # Combine and get predictions
+        combined = torch.cat([patch_embeds, text_embeds], dim=1)
+        outputs = self.base_model(inputs_embeds=combined)
+        text_outputs = outputs.last_hidden_state[:, num_patches:, :]
         
-        # Process through base model with causal attention - force MODEL_DTYPE
-        with torch.no_grad():
-            outputs = self.base_model(inputs_embeds=combined.to(dtype=MODEL_DTYPE))
-        
-        # Extract only the text token outputs (ignore patch positions)
-        text_outputs = outputs.last_hidden_state[:, NUM_PATCHES:, :]  # [batch_size, seq_len, embed_dim]
-        
-        # Predict next tokens - force MODEL_DTYPE
-        logits = self.output_head(text_outputs.to(dtype=MODEL_DTYPE))
-        
-        return logits
+        return self.output_head(text_outputs)
     
     def generate(self, patch_features, max_length=None, start_token=None):
         """
@@ -284,12 +282,12 @@ class PatchDecoder(nn.Module):
             param.requires_grad = True
         print("Base model unfrozen - ready for fine-tuning!")
 
-def create_models_efficiently(encoder_hidden_dim=None, encoder_output_dim=None, base_model_name=None):
+def create_models_efficiently(encoder_hidden_dim=None, encoder_output_dim=None, base_model_name=None, clip_model_name=None):
     """Create encoder and decoder with shared CLIP model for maximum efficiency"""
     print("🚀 Creating models with shared components...")
     
     # Load CLIP once and share it
-    clip_model = get_clip_model()
+    clip_model = get_clip_model(clip_model_name)
     
     # Create models with shared CLIP
     encoder = PatchEncoder(
@@ -300,7 +298,8 @@ def create_models_efficiently(encoder_hidden_dim=None, encoder_output_dim=None, 
     
     decoder = PatchDecoder(
         model_name=base_model_name,
-        clip_model=clip_model
+        clip_model=clip_model,
+        encoder_output_dim=encoder_output_dim
     ).to(DEVICE)
     
     # CRITICAL: Ensure all parameters are in MODEL_DTYPE for MPS consistency

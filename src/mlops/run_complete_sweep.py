@@ -72,13 +72,13 @@ def create_focused_sweep():
                 'max': 0.0005      
             },
             'batch_size': {
-                'values': [16, 32, 48]
+                'values': [8, 16]
             },
             'encoder_hidden_dim': {
-                'values': [1024, 2048, 3072]
+                'values': [1024, 2048]
             },
             'encoder_output_dim': {
-                'values': [256, 512, 768]
+                'values': [256, 512]
             },
             'freeze_base_model': {
                 'values': [True, False]
@@ -93,7 +93,7 @@ def create_focused_sweep():
                 'values': [0.0, 0.1, 0.2]
             },
             'clip_model': {
-                'values': ['ViT-B/16', 'ViT-L/14']
+                'values': ['ViT-B/16']
             },
             'epochs': {
                 'values': [3, 5, 8]
@@ -121,10 +121,10 @@ def create_quick_test():
                 'values': [0.0001, 0.0003]
             },
             'batch_size': {
-                'values': [32]
+                'values': [16]
             },
             'encoder_hidden_dim': {
-                'values': [2048]
+                'values': [1024]
             },
             'encoder_output_dim': {
                 'values': [512]
@@ -133,7 +133,7 @@ def create_quick_test():
                 'values': [True, False]
             },
             'clip_model': {
-                'values': ['ViT-B/16', 'ViT-L/14']
+                'values': ['ViT-B/16']
             }
         }
     }

@@ -21,10 +21,10 @@ IMAGES_DIR = "data/flickr30k/images"
 CAPTIONS_FILE = "data/flickr30k/captions.json"
 
 # --- Model & Training Configurations ---
-CLIP_MODEL = 'ViT-L/14'  # Configurable - ViT-B/16 (faster) vs ViT-L/14 (better)
-BATCH_SIZE = 32          # Configurable - major impact
-EPOCHS = 5               # Configurable - different architectures need different training
-LEARNING_RATE = 1e-4     # Configurable - major impact
+CLIP_MODEL = 'ViT-B/16'  # Use smaller model to reduce memory usage (ViT-B/16 instead of ViT-L/14)
+BATCH_SIZE = 8           # Updated to match checkpoint config
+EPOCHS = 8               # Updated to match checkpoint config (more training)
+LEARNING_RATE = 0.00028006308978429485  # Updated to match checkpoint config
 SHUFFLE_DATALOADER = True
 SEED = 42
 
@@ -35,12 +35,12 @@ DECODER_FFN_RATIO = 4
 DECODER_DROPOUT = 0.1
 
 # --- Training Hyperparameters ---
-GRAD_CLIP_NORM = 1.0     # Configurable - affects training stability
-LABEL_SMOOTHING = 0.1    # Configurable - affects overfitting and quality
-WARMUP_STEPS_RATIO = 0.05  # Configurable - interacts with learning rate
+GRAD_CLIP_NORM = 1.0     # Updated to match checkpoint config
+LABEL_SMOOTHING = 0.0    # Updated to match checkpoint config (no label smoothing)
+WARMUP_STEPS_RATIO = 0.1  # Updated to match checkpoint config
 
 # --- Sweep Configuration ---
-MAX_STEPS_PER_SWEEP = 200
+MAX_STEPS_PER_SWEEP = 50
 
 # --- Checkpoint & Output Configuration ---
 CHECKPOINTS_BASE_DIR = "checkpoints"
@@ -56,16 +56,16 @@ TEST_SPLIT = 0.1         # Fixed - standard split
 
 # --- Model Architecture Configuration ---
 # PatchEncoder parameters - CONFIGURABLE (major impact)
-ENCODER_HIDDEN_DIM = 2048    # Configurable - affects model capacity
-ENCODER_OUTPUT_DIM = 512     # Configurable - affects model capacity
-NUM_PATCHES = 256           # Fixed - determined by ViT architecture
-CLIP_DIM = 768             # Fixed - determined by ViT-L/14 (changes with model)
+ENCODER_HIDDEN_DIM = 1024    # Updated to match checkpoint config
+ENCODER_OUTPUT_DIM = 256     # Updated to match checkpoint config (CRITICAL FIX!)
+NUM_PATCHES = 196           # Adjusted for ViT-B/16 which has 14x14=196 patches (vs 16x16=256 for ViT-L/14)
+CLIP_DIM = 768              # Adjusted for ViT-B/16 which has 768 dim (vs 1024 for ViT-L/14)
 
 # PatchDecoder parameters - FIXED (proven values)
 BASE_MODEL_NAME = "Qwen/Qwen2.5-1.5B-Instruct"  # Fixed - fast and effective
 CLIP_VOCAB_SIZE = 49408                        # Fixed - determined by CLIP
-CLIP_TEXT_DIM = 512                           # Fixed - determined by CLIP
-PATCH_FEATURE_DIM = 512                       # Fixed - matches encoder output
+CLIP_TEXT_DIM = 768                           # Fixed - determined by CLIP
+PATCH_FEATURE_DIM = 256                       # Updated to match ENCODER_OUTPUT_DIM
 
 # Generation parameters - FIXED (standard values)
 MAX_GENERATION_LENGTH = 77   # Fixed - standard for captions
