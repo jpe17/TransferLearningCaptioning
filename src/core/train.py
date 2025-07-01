@@ -91,7 +91,7 @@ def train():
     set_seed(SEED)
     
     # HARDCODE ABSOLUTE PATHS HERE - this will override any config
-    ABSOLUTE_IMAGES_DIR = "/workspace/TransferLearningCaptioning/data/flickr30k/images"
+    ABSOLUTE_IMAGES_DIR = "/workspace/TransferLearningCaptioning/data/flickr30k/Images"
     ABSOLUTE_CAPTIONS_FILE = "/workspace/TransferLearningCaptioning/data/flickr30k/captions.json"
     
     # Get all config parameters
