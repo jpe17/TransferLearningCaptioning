@@ -26,8 +26,8 @@ SHUFFLE_DATALOADER = True
 SEED = 42
 
 # --- Decoder Specific Configurations (Legacy - not used in current model) ---
-DECODER_LAYERS = 4
-DECODER_HEADS = 4
+DECODER_LAYERS = 2
+DECODER_HEADS = 2
 DECODER_FFN_RATIO = 4
 DECODER_DROPOUT = 0.1
 
