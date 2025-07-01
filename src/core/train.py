@@ -147,6 +147,10 @@ def train():
         clip_model_name=config.get('clip_model')
     )
     
+    # Convert models to float32 to match input tensor type
+    encoder = encoder.to(torch.float32)
+    decoder = decoder.to(torch.float32)
+    
     # Combine all trainable parameters
     trainable_params = list(encoder.parameters()) + list(decoder.parameters())
     optimizer = optim.Adam(trainable_params, lr=config['learning_rate'])
