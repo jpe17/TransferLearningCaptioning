@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 from .config import *
 from .model_loader import get_clip_model, get_base_model
-from .utils import set_seed
+from .utils import set_seed, get_tokenizer
 
 # Disable compilation globally
 torch._dynamo.config.suppress_errors = True
@@ -64,8 +64,25 @@ class Decoder(nn.Module):
         self.base_model = get_base_model(self.model_name)
         self.qwen_dim = self.base_model.config.hidden_size
         
+        # Get tokenizer and check vocabulary size
+        tokenizer = get_tokenizer()
+        tokenizer_vocab_size = len(tokenizer)
+        model_vocab_size = self.base_model.config.vocab_size
+        
+        print(f"🔍 Initial model vocab size: {model_vocab_size}")
+        print(f"🔍 Tokenizer vocab size: {tokenizer_vocab_size}")
+        
+        # If there's a mismatch, resize the model's token embeddings
+        if model_vocab_size != tokenizer_vocab_size:
+            print(f"⚠️ Vocabulary size mismatch! Resizing model embeddings...")
+            self.base_model.resize_token_embeddings(tokenizer_vocab_size)
+            model_vocab_size = tokenizer_vocab_size
+            print(f"✅ Model vocab size after resize: {model_vocab_size}")
+        
         self.text_projection = nn.Linear(self.qwen_dim, self.qwen_dim)
-        self.output_head = nn.Linear(self.qwen_dim, self.base_model.config.vocab_size)
+        # Always use the tokenizer's vocabulary size for the output head
+        self.output_head = nn.Linear(self.qwen_dim, tokenizer_vocab_size)
+        print(f"✅ Output head created with size: {tokenizer_vocab_size}")
 
         # Make QWEN attention layers trainable - direct access for QWEN
         for layer in self.base_model.layers:

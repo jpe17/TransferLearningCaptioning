@@ -4,7 +4,6 @@ Inference Module for Image Captioning
 """
 
 import torch
-from transformers import AutoTokenizer
 from .config import BASE_MODEL_NAME, DEVICE, IMAGE_SIZE, IMAGE_NORMALIZE_MEAN, IMAGE_NORMALIZE_STD
 from .model import Encoder, Decoder
 from .model_loader import get_clip_model, get_base_model
