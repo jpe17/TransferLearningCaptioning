@@ -45,6 +45,8 @@ class Encoder(nn.Module):
             x = self.clip_model.visual.transformer(x)
             x = x.permute(1, 0, 2)
         
+        # Convert output to the same dtype as projection layer weights
+        x = x.to(self.projection[0].weight.dtype)
         return self.projection(x)
 
 
