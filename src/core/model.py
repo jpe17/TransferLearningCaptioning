@@ -36,14 +36,11 @@ class Encoder(nn.Module):
             nn.Linear(hidden_dim, output_dim)
         )
         
-        # Ensure projection layers use float16
-        self.projection.to(MODEL_DTYPE)
-        
     def forward(self, images):
         # Input: images [batch_size, 3, 224, 224]
         with torch.no_grad():
-            # Ensure images are float16
-            images = images.to(MODEL_DTYPE)  # [batch_size, 3, 224, 224]
+            # Match input dtype to what CLIP expects
+            images = images.to(self.clip_model.visual.conv1.weight.dtype)  # [batch_size, 3, 224, 224]
             
             x = self.clip_model.visual.conv1(images)  # [batch_size, 768, 14, 14] (patch embedding)
             x = x.reshape(x.shape[0], x.shape[1], -1).permute(0, 2, 1)  # [batch_size, 196, 768] (flatten patches)
@@ -52,6 +49,8 @@ class Encoder(nn.Module):
             x = self.clip_model.visual.transformer(x)  # [196, batch_size, 768] (transformer output)
             x = x.permute(1, 0, 2)  # [batch_size, 196, 768] (batch first again)
         
+        # Match output dtype to projection layer
+        x = x.to(self.projection[0].weight.dtype)
         # Output: x [batch_size, 196, 768] -> projection -> [batch_size, 196, output_dim]
         return self.projection(x)  # [batch_size, 196, ENCODER_OUTPUT_DIM]
 
@@ -81,11 +80,6 @@ class Decoder(nn.Module):
             
             attn.q_proj = new_q
             attn.v_proj = new_v
-            
-        # Ensure all components use float16
-        self.visual_projection.to(MODEL_DTYPE)
-        self.text_projection.to(MODEL_DTYPE)
-        self.output_head.to(MODEL_DTYPE)
 
         print(f"✅ Decoder ready (dim: {self.qwen_dim})")
     
@@ -98,8 +92,8 @@ class Decoder(nn.Module):
         num_patches = patch_features.size(1)  # 196
         seq_len = input_tokens.size(1)
         
-        # Ensure inputs are float16
-        patch_features = patch_features.to(MODEL_DTYPE)  # [batch_size, 196, 256]
+        # Match patch_features dtype to visual_projection
+        patch_features = patch_features.to(self.visual_projection.weight.dtype)  # [batch_size, 196, 256]
             
         # Project visual and text to same space
         visual_embeds = self.visual_projection(patch_features)  # [batch_size, 196, qwen_dim]
@@ -107,8 +101,8 @@ class Decoder(nn.Module):
         with torch.no_grad():
             text_embeds = self.base_model.get_input_embeddings()(input_tokens)  # [batch_size, seq_len, qwen_dim]
             
-        # Convert text_embeds to float16
-        text_embeds = text_embeds.to(MODEL_DTYPE)  # [batch_size, seq_len, qwen_dim]
+        # Match text_embeds dtype to text_projection
+        text_embeds = text_embeds.to(self.text_projection.weight.dtype)  # [batch_size, seq_len, qwen_dim]
         text_embeds = self.text_projection(text_embeds)  # [batch_size, seq_len, qwen_dim]
         
         # Concatenate visual and text embeddings

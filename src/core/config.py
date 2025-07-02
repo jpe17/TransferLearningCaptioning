@@ -2,8 +2,6 @@ import torch
 import os
 
 # --- Device Configuration ---
-MODEL_DTYPE = torch.float16  # Always use float16 for all models
-
 if torch.cuda.is_available():
     DEVICE = "cuda"
 elif torch.backends.mps.is_available():

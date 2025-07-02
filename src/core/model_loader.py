@@ -24,37 +24,23 @@ def get_clip_model(model_name=None):
     cache_key = f"clip_{model_name}"
     
     if cache_key not in _MODEL_CACHE:
-        # MONKEY PATCH: Fix CLIP's LayerNorm to work with float16.
-        # The original LayerNorm forces inputs to float32, causing dtype mismatches.
-        def new_forward(self, x: torch.Tensor):
-            return torch.nn.functional.layer_norm(x, self.normalized_shape, self.weight, self.bias, self.eps)
-        
-        clip.model.LayerNorm.forward = new_forward
-        print("🔧 Monkey-patched clip.model.LayerNorm to support float16.")
-
         print(f"🔄 Loading CLIP model: {model_name}")
-        
-        # Use persistent cache directory to avoid redownloading
-        model_cache_dir = os.path.join(CACHE_DIR, f"clip_{model_name.replace('/', '_')}")
         
         # Load CLIP with persistent cache
         try:
             _MODEL_CACHE[cache_key], _ = clip.load(
                 model_name, 
                 device=DEVICE,
-                download_root=CACHE_DIR  # Persistent cache - NO MORE REDOWNLOADING!
+                download_root=CACHE_DIR
             )
         except Exception as e:
             print(f"⚠️ Error loading CLIP from cache, retrying: {e}")
             _MODEL_CACHE[cache_key], _ = clip.load(model_name, device=DEVICE)
         
-        # Always convert to float16
-        _MODEL_CACHE[cache_key] = _MODEL_CACHE[cache_key].to(dtype=MODEL_DTYPE)
-        
         if FREEZE_CLIP:
             for param in _MODEL_CACHE[cache_key].parameters():
                 param.requires_grad = False
-        print(f"✅ CLIP model {model_name} loaded and converted to {MODEL_DTYPE}")
+        print(f"✅ CLIP model {model_name} loaded with natural dtype")
     else:
         print(f"⚡ Using in-memory cached CLIP model: {model_name}")
     
@@ -74,17 +60,13 @@ def get_base_model(model_name=None):
         _MODEL_CACHE[cache_key] = AutoModel.from_pretrained(
             model_name, 
             trust_remote_code=True,
-            torch_dtype=MODEL_DTYPE,  # Use consistent dtype from config
-            cache_dir=base_cache_dir  # Persistent cache - NO MORE REDOWNLOADING!
+            cache_dir=base_cache_dir
         )
-        
-        # Ensure model is actually in float16
-        _MODEL_CACHE[cache_key] = _MODEL_CACHE[cache_key].to(dtype=MODEL_DTYPE)
         
         if FREEZE_BASE_MODEL:
             for param in _MODEL_CACHE[cache_key].parameters():
                 param.requires_grad = False
-        print(f"✅ Base model {model_name} loaded and converted to {MODEL_DTYPE}")
+        print(f"✅ Base model {model_name} loaded with natural dtype")
     else:
         print(f"⚡ Using in-memory cached base model: {model_name}")
     
