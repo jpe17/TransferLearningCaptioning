@@ -5,31 +5,41 @@ import clip
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader, random_split
 from torchvision import transforms
+from transformers import AutoTokenizer
 from .config import *
 import urllib.request
 import zipfile
 from tqdm import tqdm
 
+# Initialize QWEN tokenizer once
+_QWEN_TOKENIZER = None
+
+def get_qwen_tokenizer():
+    """Get cached QWEN tokenizer"""
+    global _QWEN_TOKENIZER
+    if _QWEN_TOKENIZER is None:
+        _QWEN_TOKENIZER = AutoTokenizer.from_pretrained(BASE_MODEL_NAME, trust_remote_code=True)
+        if _QWEN_TOKENIZER.pad_token is None:
+            _QWEN_TOKENIZER.pad_token = _QWEN_TOKENIZER.eos_token
+    return _QWEN_TOKENIZER
+
 class TqdmUpTo(tqdm):
-    """Provides `update_to(block_num, block_size, total_size)` hook for urlretrieve."""
+    """Progress bar for file downloads"""
     def update_to(self, b=1, bsize=1, tsize=None):
         if tsize is not None:
             self.total = tsize
         self.update(b * bsize - self.n)
 
 def prepare_flickr30k_data(images_dir, captions_file):
-    """
-    Checks for Flickr30k data and downloads/prepares it if not found.
-    This makes the project self-contained and runnable with only the code.
-    """
+    """Download and prepare Flickr30k data if not found"""
     data_dir = os.path.dirname(images_dir)
     os.makedirs(data_dir, exist_ok=True)
 
-    # --- 1. Prepare Images ---
+    # Prepare Images
     if os.path.exists(images_dir):
         print(f"✅ Flickr30k images found at: {images_dir}")
     else:
-        print("📂 Flickr30k images not found. Downloading...")
+        print("📂 Downloading Flickr30k images...")
         
         base_url = "https://github.com/awsaf49/flickr-dataset/releases/download/v1.0/"
         parts = ["flickr30k_part00", "flickr30k_part01", "flickr30k_part02"]
@@ -59,14 +69,13 @@ def prepare_flickr30k_data(images_dir, captions_file):
         original_unzipped_dir = os.path.join(data_dir, 'flickr30k-images')
         if os.path.exists(original_unzipped_dir):
             os.rename(original_unzipped_dir, images_dir)
-            print(f"✅ Renamed {original_unzipped_dir} to {images_dir}")
-        print("✅ Images are ready.")
+        print("✅ Images ready")
 
-    # --- 2. Prepare Captions ---
+    # Prepare Captions
     if os.path.exists(captions_file):
         print(f"✅ Captions file found at: {captions_file}")
     else:
-        print("📂 Captions file not found. Downloading and processing...")
+        print("📂 Downloading and processing captions...")
         
         captions_zip_path = os.path.join(data_dir, "caption_datasets.zip")
         download_url = "https://cs.stanford.edu/people/karpathy/deepimagesent/caption_datasets.zip"
@@ -96,10 +105,9 @@ def prepare_flickr30k_data(images_dir, captions_file):
 class SimpleImageCaptionDataset(Dataset):
     """Simple dataset for image-caption pairs"""
     
-    def __init__(self, data_pairs, transform=None, tokenizer=None):
+    def __init__(self, data_pairs, transform=None):
         self.data = data_pairs
         self.transform = transform or self._default_transform()
-        self.tokenizer = tokenizer or clip_tokenizer
     
     def _default_transform(self):
         return transforms.Compose([
@@ -122,17 +130,16 @@ class SimpleImageCaptionDataset(Dataset):
             print(f"Error loading {image_path}: {e}")
             return None
         
-        # Tokenize caption using the provided tokenizer
-        tokens = self.tokenizer(caption)
-        
-        # Create teacher forcing pairs: input = [:-1], target = [1:]
-        if len(tokens) <= 1:
-            return None  # Skip sequences that are too short
+        # Tokenize caption
+        tokenizer = get_qwen_tokenizer()
+        tokens = tokenizer.encode(caption, max_length=MAX_GENERATION_LENGTH, truncation=True, padding='max_length')
+        tokens = torch.tensor(tokens, dtype=torch.long)
             
-        input_tokens = tokens[:-1]    # [BOS, "A", "dog", "is"]
-        target_tokens = tokens[1:]    # ["A", "dog", "is", "running", EOS]
-        
-        return image_tensor, input_tokens, target_tokens, caption
+        return {
+            'image': image_tensor,
+            'input_ids': tokens,
+            'caption': caption
+        }
 
 def load_flickr_data(images_dir, captions_file, max_samples=None):
     """Load Flickr data"""
@@ -148,36 +155,34 @@ def load_flickr_data(images_dir, captions_file, max_samples=None):
     
     return pairs
 
-# Default tokenizer using CLIP
-def clip_tokenizer(caption):
-    """Default CLIP tokenizer"""
-    return clip.tokenize(caption, truncate=True).squeeze()
-
 def collate_fn(batch):
-    """Custom collate function to handle None values from dataset."""
+    """Custom collate function to handle None values"""
     batch = [item for item in batch if item is not None]
     if not batch:
-        return None, None, None, None
+        return {}
     
-    images, input_tokens, target_tokens, captions = zip(*batch)
-    return torch.stack(images), torch.stack(input_tokens), torch.stack(target_tokens), list(captions)
+    return {
+        'image': torch.stack([item['image'] for item in batch]),
+        'input_ids': torch.stack([item['input_ids'] for item in batch]),
+        'caption': [item['caption'] for item in batch]
+    }
 
-def create_dataloaders(images_dir=None, captions_file=None, batch_size=None, val_split=None, test_split=None, seed=None, tokenizer=None, max_samples=None):
-    """Create train/val/test dataloaders with teacher forcing"""
-    # ALWAYS use absolute paths
-    images_dir = "/workspace/TransferLearningCaptioning/data/flickr30k/Images"
-    captions_file = "/workspace/TransferLearningCaptioning/data/flickr30k/captions.json"
+def create_dataloaders(images_dir=None, captions_file=None, batch_size=None, val_split=None, test_split=None, seed=None, max_samples=None):
+    """Create train/val/test dataloaders"""
+    # Use absolute paths
+    images_dir = "data/flickr30k/Images"
+    captions_file = "data/flickr30k/captions.json"
     
     batch_size = batch_size or BATCH_SIZE
     val_split = val_split or VAL_SPLIT
     test_split = test_split or TEST_SPLIT
     seed = seed or SEED
     
-    # Ensure data is present before loading
+    # Ensure data is present
     prepare_flickr30k_data(images_dir, captions_file)
     
     data_pairs = load_flickr_data(images_dir, captions_file, max_samples=max_samples)
-    dataset = SimpleImageCaptionDataset(data_pairs, tokenizer=tokenizer)
+    dataset = SimpleImageCaptionDataset(data_pairs)
     
     # Calculate splits
     test_size = int(len(dataset) * test_split)
@@ -189,10 +194,8 @@ def create_dataloaders(images_dir=None, captions_file=None, batch_size=None, val
         dataset, [train_size, val_size, test_size], generator=generator
     )
     
-    # Use multiple workers for faster data loading
-    # Set persistent_workers=True to avoid re-initializing workers, which is slow on macOS/Windows
-    # Set pin_memory=True to speed up data transfer to the GPU
-    num_workers = 4  # A sensible default, can be tuned
+    # Create dataloaders with optimized settings
+    num_workers = 4
     
     train_loader = DataLoader(
         train_dataset, 
@@ -201,7 +204,7 @@ def create_dataloaders(images_dir=None, captions_file=None, batch_size=None, val
         collate_fn=collate_fn,
         num_workers=num_workers,
         pin_memory=True,
-        persistent_workers=True if num_workers > 0 else False
+        persistent_workers=True
     )
     val_loader = DataLoader(
         val_dataset, 
@@ -210,7 +213,7 @@ def create_dataloaders(images_dir=None, captions_file=None, batch_size=None, val
         collate_fn=collate_fn,
         num_workers=num_workers,
         pin_memory=True,
-        persistent_workers=True if num_workers > 0 else False
+        persistent_workers=True
     )
     test_loader = DataLoader(
         test_dataset, 
@@ -219,7 +222,7 @@ def create_dataloaders(images_dir=None, captions_file=None, batch_size=None, val
         collate_fn=collate_fn,
         num_workers=num_workers,
         pin_memory=True,
-        persistent_workers=True if num_workers > 0 else False
+        persistent_workers=True
     )
     
     return train_loader, val_loader, test_loader
