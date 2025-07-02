@@ -36,17 +36,20 @@ class Encoder(nn.Module):
             nn.Linear(hidden_dim, output_dim)
         )
         
+        # Ensure projection layers use float16
+        self.projection.to(MODEL_DTYPE)
+        
     def forward(self, images):
         with torch.no_grad():
-            x = self.clip_model.visual.conv1(images.to(self.clip_model.visual.conv1.weight.dtype))
+            # Ensure images are float16
+            images = images.to(MODEL_DTYPE)
+            x = self.clip_model.visual.conv1(images)
             x = x.reshape(x.shape[0], x.shape[1], -1).permute(0, 2, 1)
             x = self.clip_model.visual.ln_pre(x)
             x = x.permute(1, 0, 2)
             x = self.clip_model.visual.transformer(x)
             x = x.permute(1, 0, 2)
         
-        # Convert output to the same dtype as projection layer weights
-        x = x.to(self.projection[0].weight.dtype)
         return self.projection(x)
 
 
@@ -75,15 +78,26 @@ class Decoder(nn.Module):
             
             attn.q_proj = new_q
             attn.v_proj = new_v
+            
+        # Ensure all components use float16
+        self.visual_projection.to(MODEL_DTYPE)
+        self.text_projection.to(MODEL_DTYPE)
+        self.output_head.to(MODEL_DTYPE)
 
         print(f"✅ Decoder ready (dim: {self.qwen_dim})")
     
     def forward(self, patch_features, input_tokens, labels=None):
+        # Ensure inputs are float16
+        patch_features = patch_features.to(MODEL_DTYPE)
+            
         # Project visual and text to same space
         visual_embeds = self.visual_projection(patch_features)
         
         with torch.no_grad():
             text_embeds = self.base_model.get_input_embeddings()(input_tokens)
+            
+        # Convert text_embeds to float16
+        text_embeds = text_embeds.to(MODEL_DTYPE)
         text_embeds = self.text_projection(text_embeds)
         
         # Concatenate and create attention mask

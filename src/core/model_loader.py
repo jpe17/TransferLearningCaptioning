@@ -40,17 +40,13 @@ def get_clip_model(model_name=None):
             print(f"⚠️ Error loading CLIP from cache, retrying: {e}")
             _MODEL_CACHE[cache_key], _ = clip.load(model_name, device=DEVICE)
         
-        # CRITICAL: Force consistent dtype on MPS to avoid mismatch errors
-        if DEVICE == "mps":
-            _MODEL_CACHE[cache_key] = _MODEL_CACHE[cache_key].to(dtype=MODEL_DTYPE)
-            # Ensure ALL parameters are on the same device
-            _MODEL_CACHE[cache_key] = _MODEL_CACHE[cache_key].to(DEVICE)
-            print(f"🔧 Converted CLIP model to {MODEL_DTYPE} and moved entirely to {DEVICE}")
+        # Always convert to float16
+        _MODEL_CACHE[cache_key] = _MODEL_CACHE[cache_key].to(dtype=MODEL_DTYPE)
         
         if FREEZE_CLIP:
             for param in _MODEL_CACHE[cache_key].parameters():
                 param.requires_grad = False
-        print(f"✅ CLIP model {model_name} loaded and cached persistently")
+        print(f"✅ CLIP model {model_name} loaded and converted to {MODEL_DTYPE}")
     else:
         print(f"⚡ Using in-memory cached CLIP model: {model_name}")
     
@@ -74,17 +70,13 @@ def get_base_model(model_name=None):
             cache_dir=base_cache_dir  # Persistent cache - NO MORE REDOWNLOADING!
         )
         
-        # CRITICAL: Ensure model is actually in the right dtype on MPS
-        if DEVICE == "mps":
-            _MODEL_CACHE[cache_key] = _MODEL_CACHE[cache_key].to(dtype=MODEL_DTYPE)
-            # Ensure ALL parameters are on the same device
-            _MODEL_CACHE[cache_key] = _MODEL_CACHE[cache_key].to(DEVICE)
-            print(f"🔧 Converted base model to {MODEL_DTYPE} and moved entirely to {DEVICE}")
+        # Ensure model is actually in float16
+        _MODEL_CACHE[cache_key] = _MODEL_CACHE[cache_key].to(dtype=MODEL_DTYPE)
         
         if FREEZE_BASE_MODEL:
             for param in _MODEL_CACHE[cache_key].parameters():
                 param.requires_grad = False
-        print(f"✅ Base model {model_name} loaded and cached persistently")
+        print(f"✅ Base model {model_name} loaded and converted to {MODEL_DTYPE}")
     else:
         print(f"⚡ Using in-memory cached base model: {model_name}")
     

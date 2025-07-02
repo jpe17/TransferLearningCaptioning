@@ -2,15 +2,14 @@ import torch
 import os
 
 # --- Device Configuration ---
+MODEL_DTYPE = torch.float16  # Always use float16 for all models
+
 if torch.cuda.is_available():
     DEVICE = "cuda"
-    MODEL_DTYPE = torch.float16
 elif torch.backends.mps.is_available():
     DEVICE = "mps" 
-    MODEL_DTYPE = torch.float16  # Force float32 on MPS for compatibility
 else:
     DEVICE = "cpu"
-    MODEL_DTYPE = torch.float16
 
 # --- Data Paths ---
 IMAGES_DIR = "/workspace/TransferLearningCaptioning/data/flickr30k/images"
