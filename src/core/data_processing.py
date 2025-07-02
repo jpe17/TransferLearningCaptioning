@@ -5,23 +5,11 @@ import clip
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader, random_split
 from torchvision import transforms
-from transformers import AutoTokenizer
 from .config import *
+from .utils import get_tokenizer
 import urllib.request
 import zipfile
 from tqdm import tqdm
-
-# Initialize QWEN tokenizer once
-_QWEN_TOKENIZER = None
-
-def get_qwen_tokenizer():
-    """Get cached QWEN tokenizer"""
-    global _QWEN_TOKENIZER
-    if _QWEN_TOKENIZER is None:
-        _QWEN_TOKENIZER = AutoTokenizer.from_pretrained(BASE_MODEL_NAME, trust_remote_code=True)
-        if _QWEN_TOKENIZER.pad_token is None:
-            _QWEN_TOKENIZER.pad_token = _QWEN_TOKENIZER.eos_token
-    return _QWEN_TOKENIZER
 
 class TqdmUpTo(tqdm):
     """Progress bar for file downloads"""
@@ -131,7 +119,7 @@ class SimpleImageCaptionDataset(Dataset):
             return None
         
         # Tokenize caption
-        tokenizer = get_qwen_tokenizer()
+        tokenizer = get_tokenizer()
         tokens = tokenizer.encode(caption, max_length=MAX_GENERATION_LENGTH, truncation=True, padding='max_length')
         tokens = torch.tensor(tokens, dtype=torch.long)
             

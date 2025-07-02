@@ -16,8 +16,8 @@ CAPTIONS_FILE = "/workspace/TransferLearningCaptioning/data/flickr30k/captions.j
 # --- Core Training Configuration ---
 CLIP_MODEL = 'ViT-B/16'
 BATCH_SIZE = 16
-EPOCHS = 1
-LEARNING_RATE = 0.001
+EPOCHS = 5
+LEARNING_RATE = 0.0001
 SHUFFLE_DATALOADER = True
 SEED = 42
 

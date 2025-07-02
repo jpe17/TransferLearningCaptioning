@@ -13,6 +13,17 @@ from datetime import datetime
 from transformers import AutoTokenizer
 from .config import BASE_MODEL_NAME
 
+_TOKENIZER = None
+
+def get_tokenizer():
+    """Get the cached global tokenizer."""
+    global _TOKENIZER
+    if _TOKENIZER is None:
+        _TOKENIZER = AutoTokenizer.from_pretrained(BASE_MODEL_NAME, trust_remote_code=True)
+        if _TOKENIZER.pad_token is None:
+            _TOKENIZER.pad_token = _TOKENIZER.eos_token
+    return _TOKENIZER
+
 def set_seed(seed):
     """Set random seeds for reproducibility"""
     random.seed(seed)
@@ -22,17 +33,6 @@ def set_seed(seed):
         torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
-
-# Tokenizer cache
-_TOKENIZER = None
-
-def get_tokenizer(model_name=BASE_MODEL_NAME):
-    global _TOKENIZER
-    if _TOKENIZER is None:
-        _TOKENIZER = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
-        if _TOKENIZER.pad_token is None:
-            _TOKENIZER.pad_token = _TOKENIZER.eos_token
-    return _TOKENIZER
 
 def calculate_token_accuracy(logits, targets):
     """Calculate token-level accuracy"""

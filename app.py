@@ -68,6 +68,10 @@ async def caption_image(file: UploadFile = File(...)):
             do_sample=True
         )
         
+        # --- DEBUG PRINT ---
+        print(f"✅ Generated Caption: '{caption}'")
+        # --- END DEBUG PRINT ---
+
         return {"caption": caption}
 
     except Exception as e:

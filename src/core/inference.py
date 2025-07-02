@@ -8,8 +8,8 @@ from transformers import AutoTokenizer
 from .config import BASE_MODEL_NAME, DEVICE, IMAGE_SIZE, IMAGE_NORMALIZE_MEAN, IMAGE_NORMALIZE_STD
 from .model import Encoder, Decoder
 from .model_loader import get_clip_model, get_base_model
+from .utils import get_tokenizer
 import os
-import re
 from torchvision import transforms
 
 def find_latest_checkpoint_path(run_base_dir="runs"):
@@ -39,7 +39,7 @@ def load_models_from_checkpoint(checkpoint_path):
     qwen_dim = base_model.config.hidden_size
     
     encoder = Encoder(output_dim=qwen_dim, clip_model=clip_model).to(DEVICE)
-    decoder = Decoder(encoder_output_dim=qwen_dim, model_name=BASE_MODEL_NAME).to(DEVICE)
+    decoder = Decoder(model_name=BASE_MODEL_NAME).to(DEVICE)
     
     checkpoint = torch.load(checkpoint_path, map_location=DEVICE)
     
@@ -63,10 +63,6 @@ def get_image_transform():
 def initialize_inference_handler():
     """
     Initializes all components required for inference.
-    
-    Returns:
-        A tuple containing the caption generator and the image transform function.
-        Returns (None, None) if a checkpoint is not found.
     """
     checkpoint_path = find_latest_checkpoint_path()
     if checkpoint_path is None:
@@ -81,109 +77,99 @@ def initialize_inference_handler():
 
 class CaptionGenerator:
     """
-    Handles caption generation using the encoder-decoder model
+    Handles caption generation using a manual, step-by-step inference loop.
     """
-    
-    def __init__(self, encoder, decoder, tokenizer_name=None):
+    def __init__(self, encoder, decoder):
         self.encoder = encoder
         self.decoder = decoder
-        self.tokenizer_name = tokenizer_name or BASE_MODEL_NAME
-        self.tokenizer = None
-        self._load_tokenizer()
-    
-    def _load_tokenizer(self):
-        """Load and configure tokenizer"""
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            self.tokenizer_name, 
-            trust_remote_code=True
-        )
-        if self.tokenizer.pad_token is None:
-            self.tokenizer.pad_token = self.tokenizer.eos_token
-    
-    def generate_caption(self, images, max_length=50, temperature=0.7, do_sample=True):
+        self.tokenizer = get_tokenizer()
+
+    @torch.no_grad()
+    def generate_caption(self, images, max_length=50, temperature=0.7, do_sample=False):
         """
-        Generate captions for images
-        
+        Generates a caption for a batch of images using a handmade autoregressive loop.
+
         Args:
-            images: Batch of preprocessed images
-            max_length: Maximum caption length
-            temperature: Sampling temperature (0 = greedy)
-            do_sample: Whether to use sampling or greedy decoding
+            images (torch.Tensor): The input images.
+            max_length (int): The maximum length of the generated caption.
+            temperature (float): Controls the randomness of sampling. Higher is more random.
+            do_sample (bool): If True, uses sampling. If False, uses greedy decoding.
+                              Defaults to False for deterministic output.
         """
         self.encoder.eval()
         self.decoder.eval()
-        
-        with torch.no_grad():
-            # Extract patch features
-            patch_features = self.encoder(images)
-            batch_size = patch_features.size(0)
-            
-            # Project visual patches to QWEN dimension
-            visual_embeds = self.decoder.visual_projection(patch_features)
-            
-            # Start with beginning token
-            start_token_id = self._get_start_token()
-            input_ids = torch.full((batch_size, 1), start_token_id, device=patch_features.device)
-            
-            # Generate tokens one by one
-            for _ in range(max_length):
-                # Get current text embeddings and project them
-                text_embeds = self.decoder.base_model.get_input_embeddings()(input_ids)
-                text_embeds = self.decoder.text_projection(text_embeds)
-                
-                # Concatenate visual and text embeddings
-                combined_embeds = torch.cat([visual_embeds, text_embeds], dim=1)
-                
-                # Forward through QWEN
-                outputs = self.decoder.base_model(inputs_embeds=combined_embeds, return_dict=True)
-                
-                # Get next token logits (last text position)
-                next_token_logits = self.decoder.output_head(outputs.last_hidden_state[:, -1, :])
-                
-                # Sample next token
-                next_token = self._sample_next_token(next_token_logits, temperature, do_sample)
-                
-                # Append to sequence
-                input_ids = torch.cat([input_ids, next_token], dim=1)
-                
-                # Stop if EOS
-                if self.tokenizer.eos_token_id and next_token.item() == self.tokenizer.eos_token_id:
-                    break
-            
-            # Decode to text
-            captions = []
-            for i in range(batch_size):
-                caption = self.tokenizer.decode(input_ids[i], skip_special_tokens=True)
-                captions.append(caption)
-            
-            return captions if batch_size > 1 else captions[0]
-    
-    def _get_start_token(self):
-        """Get appropriate start token"""
-        return self.tokenizer.bos_token_id or self.tokenizer.eos_token_id
-    
-    def _sample_next_token(self, logits, temperature, do_sample):
-        """Sample next token with temperature control"""
-        if do_sample and temperature > 0:
-            # Apply temperature and sample
-            logits = logits / temperature
-            probs = torch.softmax(logits, dim=-1)
-            next_token = torch.multinomial(probs, num_samples=1)
-        else:
-            # Greedy decoding
-            next_token = torch.argmax(logits, dim=-1, keepdim=True)
-        
-        return next_token
 
-def generate_caption(encoder, decoder, images, **kwargs):
-    """
-    Convenience function for quick caption generation
-    
-    Args:
-        encoder: Trained encoder model
-        decoder: Trained decoder model  
-        images: Batch of preprocessed images
-        **kwargs: Additional arguments for generation (max_length, temperature, etc.)
-    """
-    generator = CaptionGenerator(encoder, decoder)
-    return generator.generate_caption(images, **kwargs) 
+        # Ensure images are on the correct device
+        images = images.to(DEVICE)
+        batch_size = images.size(0)
+
+        # 1. Encode image to get visual features, already projected to the right dimension
+        visual_embeds = self.encoder(images)
+
+        # 2. Start generation with a proper start token
+        # Use a neutral token that won't immediately terminate generation
+        if hasattr(self.tokenizer, 'bos_token_id') and self.tokenizer.bos_token_id is not None:
+            start_token_id = self.tokenizer.bos_token_id
+        else:
+            # Use a common word token instead of eos_token_id to avoid immediate termination
+            start_token_id = self.tokenizer.encode("The", add_special_tokens=False)[0]
+        
+        input_ids = torch.full((batch_size, 1), start_token_id, dtype=torch.long, device=DEVICE)
+
+        # 3. Generate tokens one by one
+        for _ in range(max_length):
+            # Embed the tokens generated so far
+            text_embeds = self.decoder.base_model.get_input_embeddings()(input_ids)
+            text_embeds = self.decoder.text_projection(text_embeds)
+
+            # Combine visual and text embeddings
+            combined_embeds = torch.cat([visual_embeds, text_embeds], dim=1)
+            
+            # Create the same attention mask as in training
+            total_len = combined_embeds.size(1)
+            num_patches = visual_embeds.size(1)
+            
+            # 1. Start with a causal mask for the entire sequence
+            attention_mask = torch.tril(torch.ones((total_len, total_len), device=DEVICE))
+            
+            # 2. Make the visual prefix part of the mask bidirectional
+            attention_mask[:, :num_patches] = 1
+            
+            # 3. Reshape to the 4D format (batch_size, num_heads, seq_len, seq_len)
+            attention_mask = attention_mask.unsqueeze(0).unsqueeze(0)
+            attention_mask = attention_mask.expand(batch_size, -1, -1, -1)
+
+            # Get model outputs
+            outputs = self.decoder.base_model(
+                inputs_embeds=combined_embeds,
+                attention_mask=attention_mask,
+                return_dict=True
+            )
+
+            # Get the logits for the very last token (the prediction for the next token)
+            next_token_logits = outputs.last_hidden_state[:, -1, :]
+            next_token_logits = self.decoder.output_head(next_token_logits)
+
+            # 4. Sample the next token
+            if do_sample and temperature > 0:
+                probs = torch.softmax(next_token_logits / temperature, dim=-1)
+                next_token = torch.multinomial(probs, num_samples=1)
+            else:
+                next_token = torch.argmax(next_token_logits, dim=-1, keepdim=True)
+            
+            # 5. Append the new token
+            input_ids = torch.cat([input_ids, next_token], dim=1)
+
+            # 6. Stop if we generate the End-Of-Sentence token (but only if it's not the first token)
+            if next_token.item() == self.tokenizer.eos_token_id and input_ids.size(1) > 2:
+                break
+        
+        # 7. Decode the generated sequence into text
+        captions = self.tokenizer.batch_decode(input_ids, skip_special_tokens=True)
+        
+        # Debug information
+        print(f"🔍 Generated {input_ids.size(1)} tokens")
+        print(f"🔍 Raw token IDs: {input_ids[0].tolist()}")
+        print(f"🔍 Generated caption: '{captions[0] if batch_size == 1 else captions[0]}'")
+        
+        return captions[0] if batch_size == 1 else captions 
