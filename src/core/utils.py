@@ -10,36 +10,21 @@ import math
 import os
 import json
 from datetime import datetime
-from transformers import AutoTokenizer
 from .config import BASE_MODEL_NAME
+from .model_loader import get_model_tokenizer_pair
 
 _TOKENIZER = None
 
 def get_tokenizer():
-    """Get the cached global tokenizer."""
+    """Get the tokenizer directly from the model-tokenizer pair."""
     global _TOKENIZER
     if _TOKENIZER is None:
-        print(f"🔄 Initializing tokenizer for model: {BASE_MODEL_NAME}")
-        _TOKENIZER = AutoTokenizer.from_pretrained(BASE_MODEL_NAME, trust_remote_code=True)
-        
-        # Ensure all special tokens are properly set
-        if _TOKENIZER.pad_token is None:
-            _TOKENIZER.pad_token = _TOKENIZER.eos_token
-            print(f"ℹ️ Set pad_token to eos_token: {_TOKENIZER.pad_token}")
-        
-        # Add any missing special tokens that might be needed
-        special_tokens = {
-            'pad_token': _TOKENIZER.pad_token,
-            'eos_token': _TOKENIZER.eos_token,
-            'bos_token': _TOKENIZER.bos_token if hasattr(_TOKENIZER, 'bos_token') else None
-        }
-        
-        # Filter out None values
-        special_tokens = {k: v for k, v in special_tokens.items() if v is not None}
+        print(f"🔄 Loading tokenizer from model-tokenizer pair: {BASE_MODEL_NAME}")
+        # Get tokenizer from the paired loading function
+        _, _TOKENIZER = get_model_tokenizer_pair(BASE_MODEL_NAME)
         
         # Print tokenizer information for debugging
-        print(f"ℹ️ Tokenizer vocabulary size: {len(_TOKENIZER)}")
-        print(f"ℹ️ Tokenizer special tokens: {special_tokens}")
+        print(f"ℹ️ Tokenizer loaded directly from model")
         
     return _TOKENIZER
 

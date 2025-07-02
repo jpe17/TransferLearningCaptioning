@@ -6,7 +6,7 @@ from PIL import Image
 from torch.utils.data import Dataset, DataLoader, random_split
 from torchvision import transforms
 from .config import *
-from .utils import get_tokenizer
+from .model_loader import get_model_tokenizer_pair
 import urllib.request
 import zipfile
 from tqdm import tqdm
@@ -96,6 +96,8 @@ class SimpleImageCaptionDataset(Dataset):
     def __init__(self, data_pairs, transform=None):
         self.data = data_pairs
         self.transform = transform or self._default_transform()
+        # Get tokenizer directly from model-tokenizer pair
+        _, self.tokenizer = get_model_tokenizer_pair()
     
     def _default_transform(self):
         return transforms.Compose([
@@ -118,9 +120,8 @@ class SimpleImageCaptionDataset(Dataset):
             print(f"Error loading {image_path}: {e}")
             return None
         
-        # Tokenize caption
-        tokenizer = get_tokenizer()
-        tokens = tokenizer.encode(caption, max_length=MAX_GENERATION_LENGTH, truncation=True, padding='max_length')
+        # Tokenize caption using the tokenizer from model-tokenizer pair
+        tokens = self.tokenizer.encode(caption, max_length=MAX_GENERATION_LENGTH, truncation=True, padding='max_length')
         tokens = torch.tensor(tokens, dtype=torch.long)
             
         return {

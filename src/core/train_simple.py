@@ -10,8 +10,8 @@ from rouge import Rouge
 import nltk
 
 from .model import Encoder, Decoder
-from .utils import set_seed, get_tokenizer, create_run_folder, save_checkpoint, calculate_perplexity, calculate_token_accuracy
-from .model_loader import get_base_model, get_clip_model
+from .utils import set_seed, create_run_folder, save_checkpoint, calculate_perplexity, calculate_token_accuracy
+from .model_loader import get_clip_model, get_model_tokenizer_pair
 from .data_processing import create_dataloaders
 from .config import *
 from .inference import CaptionGenerator
@@ -80,7 +80,7 @@ def validate(caption_generator, val_loader):
 
     return val_metrics
 
-def train():
+def train(test_mode=False):
     # Download NLTK data required for METEOR
     try:
         nltk.data.find('tokenizers/punkt')
@@ -116,7 +116,7 @@ def train():
     
     # Models - reuse cached models (no reloading)
     clip_model = get_clip_model()
-    base_model = get_base_model()
+    base_model, _ = get_model_tokenizer_pair()
     qwen_dim = base_model.config.hidden_size
     
     encoder = Encoder(output_dim=qwen_dim, clip_model=clip_model).to(DEVICE)
@@ -125,16 +125,16 @@ def train():
     
     # Training
     optimizer = optim.Adam(list(encoder.parameters()) + list(decoder.parameters()), lr=LEARNING_RATE)
-    tokenizer = get_tokenizer()
     
     # --- Sanity Check ---
-    # The tokenizer and model vocabulary sizes are now automatically synchronized in the Decoder class
-    print("✅ Tokenizer and model vocabulary sizes are automatically synchronized.")
+    # Using the model and tokenizer directly as a pair
+    print("✅ Using model and tokenizer directly as a pair.")
     # --- End Sanity Check ---
     
     wandb.init(project="simple-captioning", name=os.path.basename(run_dir))
     
     step = 0
+    max_steps = 10 if test_mode else float('inf')  # Only do 10 steps in test mode
     for epoch in range(EPOCHS):
         for batch in tqdm(train_loader, desc=f"Epoch {epoch+1}"):
             if not batch:  # Skip empty batches
@@ -149,7 +149,7 @@ def train():
             
             # Mask padding tokens in labels to prevent them from contributing to the loss.
             # The loss function (CrossEntropyLoss) is configured to ignore index -100.
-            tokenizer = get_tokenizer()
+            tokenizer = decoder.tokenizer  # Use tokenizer directly from decoder
             labels[labels == tokenizer.pad_token_id] = -100
             
             optimizer.zero_grad()
@@ -185,6 +185,9 @@ def train():
                 wandb.log(val_metrics)
                 
                 save_checkpoint(run_dir, step, encoder, decoder, optimizer, config)
+            
+            if step >= max_steps:
+                break
     
     # Final save
     save_checkpoint(run_dir, step, encoder, decoder, optimizer, config)

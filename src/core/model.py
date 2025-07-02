@@ -7,8 +7,8 @@ Simple models for image captioning with CLIP + QWEN.
 import torch
 import torch.nn as nn
 from .config import *
-from .model_loader import get_clip_model, get_base_model
-from .utils import set_seed, get_tokenizer
+from .model_loader import get_clip_model, get_base_model, get_model_tokenizer_pair
+from .utils import set_seed
 
 # Disable compilation globally
 torch._dynamo.config.suppress_errors = True
@@ -61,28 +61,19 @@ class Decoder(nn.Module):
     def __init__(self, model_name=None):
         super().__init__()
         self.model_name = model_name or BASE_MODEL_NAME
-        self.base_model = get_base_model(self.model_name)
+        
+        # Get model and tokenizer as a perfectly aligned pair
+        self.base_model, self.tokenizer = get_model_tokenizer_pair(self.model_name)
         self.qwen_dim = self.base_model.config.hidden_size
         
-        # Get tokenizer and check vocabulary size
-        tokenizer = get_tokenizer()
-        tokenizer_vocab_size = len(tokenizer)
+        # Get vocabulary size directly from the model
         model_vocab_size = self.base_model.config.vocab_size
-        
-        print(f"🔍 Initial model vocab size: {model_vocab_size}")
-        print(f"🔍 Tokenizer vocab size: {tokenizer_vocab_size}")
-        
-        # If there's a mismatch, resize the model's token embeddings
-        if model_vocab_size != tokenizer_vocab_size:
-            print(f"⚠️ Vocabulary size mismatch! Resizing model embeddings...")
-            self.base_model.resize_token_embeddings(tokenizer_vocab_size)
-            model_vocab_size = tokenizer_vocab_size
-            print(f"✅ Model vocab size after resize: {model_vocab_size}")
+        print(f"🔍 Using model's vocabulary size: {model_vocab_size}")
         
         self.text_projection = nn.Linear(self.qwen_dim, self.qwen_dim)
-        # Always use the tokenizer's vocabulary size for the output head
-        self.output_head = nn.Linear(self.qwen_dim, tokenizer_vocab_size)
-        print(f"✅ Output head created with size: {tokenizer_vocab_size}")
+        # Use the model's vocabulary size for the output head
+        self.output_head = nn.Linear(self.qwen_dim, model_vocab_size)
+        print(f"✅ Output head created with model's vocabulary size: {model_vocab_size}")
 
         # Make QWEN attention layers trainable - direct access for QWEN
         for layer in self.base_model.layers:

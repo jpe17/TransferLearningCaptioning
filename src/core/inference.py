@@ -6,8 +6,7 @@ Inference Module for Image Captioning
 import torch
 from .config import BASE_MODEL_NAME, DEVICE, IMAGE_SIZE, IMAGE_NORMALIZE_MEAN, IMAGE_NORMALIZE_STD
 from .model import Encoder, Decoder
-from .model_loader import get_clip_model, get_base_model
-from .utils import get_tokenizer
+from .model_loader import get_clip_model, get_model_tokenizer_pair
 import os
 from torchvision import transforms
 
@@ -34,7 +33,7 @@ def load_models_from_checkpoint(checkpoint_path):
     print(f"🔄 Loading models from checkpoint: {checkpoint_path}")
     
     clip_model = get_clip_model()
-    base_model = get_base_model()
+    base_model, _ = get_model_tokenizer_pair()
     qwen_dim = base_model.config.hidden_size
     
     encoder = Encoder(output_dim=qwen_dim, clip_model=clip_model).to(DEVICE)
@@ -81,7 +80,7 @@ class CaptionGenerator:
     def __init__(self, encoder, decoder):
         self.encoder = encoder
         self.decoder = decoder
-        self.tokenizer = get_tokenizer()
+        self.tokenizer = decoder.tokenizer
 
     @torch.no_grad()
     def generate_caption(self, images, max_length=50, temperature=0.7, do_sample=False):

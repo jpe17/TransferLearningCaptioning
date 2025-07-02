@@ -8,7 +8,7 @@ import clip
 import os
 import time
 import shutil
-from transformers import AutoModel
+from transformers import AutoModel, AutoTokenizer
 from .config import *
 
 # Global model cache to avoid reloading
@@ -67,8 +67,54 @@ def get_base_model(model_name=None):
             for param in _MODEL_CACHE[cache_key].parameters():
                 param.requires_grad = False
         print(f"✅ Base model {model_name} loaded with natural dtype")
+        
+        # Print vocabulary size from the model's config
+        vocab_size = _MODEL_CACHE[cache_key].config.vocab_size
+        print(f"📚 Model vocabulary size: {vocab_size}")
     else:
         print(f"⚡ Using in-memory cached base model: {model_name}")
+    
+    return _MODEL_CACHE[cache_key]
+
+def get_model_tokenizer_pair(model_name=None):
+    """Get model and tokenizer as a perfectly aligned pair"""
+    from transformers import AutoTokenizer
+    
+    model_name = model_name or BASE_MODEL_NAME
+    cache_key = f"pair_{model_name}"
+    
+    if cache_key not in _MODEL_CACHE:
+        print(f"🔄 Loading model-tokenizer pair: {model_name}")
+        
+        # Use persistent cache directory to avoid redownloading
+        base_cache_dir = os.path.join(CACHE_DIR, "transformers")
+        
+        # Load both model and tokenizer with the same parameters
+        model = AutoModel.from_pretrained(
+            model_name, 
+            trust_remote_code=True,
+            cache_dir=base_cache_dir
+        )
+        
+        tokenizer = AutoTokenizer.from_pretrained(
+            model_name,
+            trust_remote_code=True,
+            cache_dir=base_cache_dir
+        )
+        
+        # Store as a pair
+        _MODEL_CACHE[cache_key] = (model, tokenizer)
+        
+        # Print vocabulary sizes to verify alignment
+        model_vocab_size = model.config.vocab_size
+        tokenizer_vocab_size = len(tokenizer)
+        print(f"📚 Model vocabulary size: {model_vocab_size}")
+        print(f"📚 Tokenizer vocabulary size: {tokenizer_vocab_size}")
+        
+        if model_vocab_size != tokenizer_vocab_size:
+            print(f"⚠️ WARNING: Model vocab size ({model_vocab_size}) doesn't match tokenizer ({tokenizer_vocab_size})")
+    else:
+        print(f"⚡ Using in-memory cached model-tokenizer pair: {model_name}")
     
     return _MODEL_CACHE[cache_key]
 
