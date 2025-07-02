@@ -24,6 +24,14 @@ def get_clip_model(model_name=None):
     cache_key = f"clip_{model_name}"
     
     if cache_key not in _MODEL_CACHE:
+        # MONKEY PATCH: Fix CLIP's LayerNorm to work with float16.
+        # The original LayerNorm forces inputs to float32, causing dtype mismatches.
+        def new_forward(self, x: torch.Tensor):
+            return torch.nn.functional.layer_norm(x, self.normalized_shape, self.weight, self.bias, self.eps)
+        
+        clip.model.LayerNorm.forward = new_forward
+        print("🔧 Monkey-patched clip.model.LayerNorm to support float16.")
+
         print(f"🔄 Loading CLIP model: {model_name}")
         
         # Use persistent cache directory to avoid redownloading
