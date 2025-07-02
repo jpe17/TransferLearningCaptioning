@@ -38,7 +38,7 @@ class Encoder(nn.Module):
         
     def forward(self, images):
         with torch.no_grad():
-            x = self.clip_model.visual.conv1(images.to(torch.float32))
+            x = self.clip_model.visual.conv1(images.to(self.clip_model.visual.conv1.weight.dtype))
             x = x.reshape(x.shape[0], x.shape[1], -1).permute(0, 2, 1)
             x = self.clip_model.visual.ln_pre(x)
             x = x.permute(1, 0, 2)
