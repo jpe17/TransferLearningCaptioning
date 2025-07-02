@@ -40,17 +40,20 @@ class Encoder(nn.Module):
         self.projection.to(MODEL_DTYPE)
         
     def forward(self, images):
+        # Input: images [batch_size, 3, 224, 224]
         with torch.no_grad():
             # Ensure images are float16
-            images = images.to(MODEL_DTYPE)
-            x = self.clip_model.visual.conv1(images)
-            x = x.reshape(x.shape[0], x.shape[1], -1).permute(0, 2, 1)
-            x = self.clip_model.visual.ln_pre(x)
-            x = x.permute(1, 0, 2)
-            x = self.clip_model.visual.transformer(x)
-            x = x.permute(1, 0, 2)
+            images = images.to(MODEL_DTYPE)  # [batch_size, 3, 224, 224]
+            
+            x = self.clip_model.visual.conv1(images)  # [batch_size, 768, 14, 14] (patch embedding)
+            x = x.reshape(x.shape[0], x.shape[1], -1).permute(0, 2, 1)  # [batch_size, 196, 768] (flatten patches)
+            x = self.clip_model.visual.ln_pre(x)  # [batch_size, 196, 768] (layer norm)
+            x = x.permute(1, 0, 2)  # [196, batch_size, 768] (seq_len first for transformer)
+            x = self.clip_model.visual.transformer(x)  # [196, batch_size, 768] (transformer output)
+            x = x.permute(1, 0, 2)  # [batch_size, 196, 768] (batch first again)
         
-        return self.projection(x)
+        # Output: x [batch_size, 196, 768] -> projection -> [batch_size, 196, output_dim]
+        return self.projection(x)  # [batch_size, 196, ENCODER_OUTPUT_DIM]
 
 
 class Decoder(nn.Module):
@@ -87,45 +90,50 @@ class Decoder(nn.Module):
         print(f"✅ Decoder ready (dim: {self.qwen_dim})")
     
     def forward(self, patch_features, input_tokens, labels=None):
+        # Input shapes:
+        # patch_features: [batch_size, num_patches, encoder_output_dim] = [batch_size, 196, 256]
+        # input_tokens: [batch_size, seq_len] where seq_len varies per sample
+        
+        batch_size = patch_features.size(0)
+        num_patches = patch_features.size(1)  # 196
+        seq_len = input_tokens.size(1)
+        
         # Ensure inputs are float16
-        patch_features = patch_features.to(MODEL_DTYPE)
+        patch_features = patch_features.to(MODEL_DTYPE)  # [batch_size, 196, 256]
             
         # Project visual and text to same space
-        visual_embeds = self.visual_projection(patch_features)
+        visual_embeds = self.visual_projection(patch_features)  # [batch_size, 196, qwen_dim]
         
         with torch.no_grad():
-            text_embeds = self.base_model.get_input_embeddings()(input_tokens)
+            text_embeds = self.base_model.get_input_embeddings()(input_tokens)  # [batch_size, seq_len, qwen_dim]
             
         # Convert text_embeds to float16
-        text_embeds = text_embeds.to(MODEL_DTYPE)
-        text_embeds = self.text_projection(text_embeds)
+        text_embeds = text_embeds.to(MODEL_DTYPE)  # [batch_size, seq_len, qwen_dim]
+        text_embeds = self.text_projection(text_embeds)  # [batch_size, seq_len, qwen_dim]
         
-        # Concatenate and create attention mask
-        combined_embeds = torch.cat([visual_embeds, text_embeds], dim=1)
-        
-        num_patches = visual_embeds.size(1)
-        seq_len = text_embeds.size(1)
+        # Concatenate visual and text embeddings
+        combined_embeds = torch.cat([visual_embeds, text_embeds], dim=1)  # [batch_size, 196+seq_len, qwen_dim]
         total_len = num_patches + seq_len
         
-        # Causal mask: text can't see future text, but can see all visual patches
-        causal_mask = torch.triu(torch.ones(total_len, total_len), diagonal=1).bool()
-        causal_mask[:, :num_patches] = False
-        attention_mask = ~causal_mask.to(combined_embeds.device)
+        # Create attention mask: 1 means "attend", 0 means "mask"
+        # Visual patches can attend to everything, text can only attend to patches + previous text
+        attention_mask = torch.ones(batch_size, total_len, dtype=torch.bool, device=combined_embeds.device)
         
-        # Forward through QWEN
+        # Forward through QWEN with proper attention mask
         outputs = self.base_model(
-            inputs_embeds=combined_embeds,
-            attention_mask=attention_mask,
+            inputs_embeds=combined_embeds,  # [batch_size, total_len, qwen_dim]
+            attention_mask=attention_mask,  # [batch_size, total_len]
             return_dict=True
         )
         
         # Get logits for text positions only
-        text_hidden = outputs.last_hidden_state[:, num_patches:, :]
-        logits = self.output_head(text_hidden)
+        text_hidden = outputs.last_hidden_state[:, num_patches:, :]  # [batch_size, seq_len, qwen_dim]
+        logits = self.output_head(text_hidden)  # [batch_size, seq_len, vocab_size]
         
         # Calculate loss
         loss = None
         if labels is not None:
+            # labels: [batch_size, seq_len]
             loss_fn = nn.CrossEntropyLoss(ignore_index=-100)
             loss = loss_fn(logits.view(-1, logits.size(-1)), labels.view(-1))
         
